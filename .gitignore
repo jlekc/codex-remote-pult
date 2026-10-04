@@ -1,0 +1,24 @@
+credentials.json
+__pycache__/
+state.json
+state.tmp
+server.log
+
+mode.json
+mode-*.tmp
+
+deliveries/
+
+bridge.lock
+logs/
+
+incoming/
+
+messages.sqlite3*
+
+# Local notification handler and editor/system artifacts
+previous-notify.json
+.DS_Store
+.env
+.env.*
+.venv/
