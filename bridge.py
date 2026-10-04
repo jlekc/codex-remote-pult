@@ -16,6 +16,7 @@ from ui import BUTTONS, keyboard, format_limits, HELP_TEXT
 from runtime import acquire
 from features import Features, WaitForChat
 from chat_store import remember, title_for, bind
+from layout import service_parts
 from new_chat import create as create_chat, open_in_vscode
 from media import attachment, download, file_prompt
 from vscode_ipc import VSCodeIPC, IpcError, turn_start_params
@@ -88,13 +89,20 @@ class Bridge(Features):
 
     def say(self, text, notification=False, markup=None, thread=None):
         result = None
-        for index, part in enumerate(chunks(text)):
+        body, title, meta = service_parts(text)
+        title = title or (title_for(thread) if thread else None)
+        if thread and not any(k == 'Чат' for k,v in meta):
+            meta.append(('Чат',thread))
+        parts = list(chunks(body,limit=3000)) or ['']
+        for index, part in enumerate(parts):
             if notification and not enabled():
                 break
             if index:
                 time.sleep(1.1)
             result = api(self.config['token'], 'sendMessage', {'chat_id': self.config['chat_id'],
-                'text': part, 'link_preview_options': {'is_disabled': True},
+                'text': part, '_presentation': {'body':part, 'title':title,
+                    'meta': meta + ([('Часть',f'{index+1}/{len(parts)}')] if len(parts)>1 else [])},
+                'link_preview_options': {'is_disabled': True},
                 'reply_markup': markup if markup is not None else keyboard(enabled())})
             bind(self.config['chat_id'], result.get('message_id'), thread)
         return result

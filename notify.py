@@ -14,6 +14,7 @@ import urllib.request
 from mode import enabled
 from delivery import claim
 from chat_store import remember, title_for, bind
+from layout import message_data
 
 CONFIG = Path(__file__).resolve().with_name('credentials.json')
 
@@ -29,6 +30,8 @@ def tls_context():
 
 
 def api(token, method, data):
+    if method == 'sendMessage':
+        data = message_data(data)
     request = urllib.request.Request(
         'https://api.telegram.org/bot' + token + '/' + method,
         data=json.dumps(data).encode(),
@@ -100,6 +103,11 @@ def send(config, event, force=False):
             text = header + (f'\nЧасть {index+1}/{len(parts)}' if len(parts)>1 else '') + '\n\n' + part
             result = api(config['token'], 'sendMessage', {
                 'chat_id': config['chat_id'], 'text': text,
+                '_presentation': {'title': title_for(thread) if thread else None,
+                    'event': headline, 'body': part,
+                    'meta': [('Проект', project[:80])] + ([('Чат', str(thread))] if thread else [])
+                        + [('Статус', str(status))]
+                        + ([('Часть', f'{index+1}/{len(parts)}')] if len(parts)>1 else [])},
                 'link_preview_options': {'is_disabled': True}})
             bind(config['chat_id'], result.get('message_id'), thread)
         if force or enabled():

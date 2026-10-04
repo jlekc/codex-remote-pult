@@ -7,6 +7,7 @@ from urllib.parse import unquote
 import uuid
 from notify import tls_context
 from chat_store import bind, register_download
+from layout import format_message
 
 MAX_BYTES=50*1024*1024
 
@@ -43,9 +44,12 @@ def send_document(config,path,cwd,thread,title):
     if len(payload)>MAX_BYTES:
         raise RuntimeError('Файл больше 50 МБ. Подготовь файл меньшего размера.')
     boundary='pult'+uuid.uuid4().hex
-    caption='Беседа: '+title[:120]+'\nЧат: '+thread
+    formatted=format_message('',{'title':title[:120], 'event':'📥 Готовый файл',
+        'body':'📎 '+p.name, 'meta':[('Чат',thread)]})
+    caption=formatted['text']
     parts=[]
-    for key,value in [('chat_id',str(config['chat_id'])),('caption',caption)]:
+    for key,value in [('chat_id',str(config['chat_id'])),('caption',caption),
+                      ('caption_entities',json.dumps(formatted['entities'],ensure_ascii=False))]:
         parts.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+key+'"\r\n\r\n'+value+'\r\n').encode())
     filename=''.join(c for c in p.name if c not in '\r\n"\\') or 'file'
     parts.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="document"; filename="'+filename+'"\r\nContent-Type: application/octet-stream\r\n\r\n').encode())
