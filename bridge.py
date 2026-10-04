@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from notify import CONFIG, api, chunks, send
 from mode import enabled, set_enabled
-from ui import BUTTONS, keyboard, format_limits
+from ui import BUTTONS, keyboard, format_limits, HELP_TEXT
 from runtime import acquire
 from features import Features, WaitForChat
 from chat_store import remember, title_for, bind
@@ -169,7 +169,7 @@ class Bridge(Features):
             self.say('Удалённый режим включён. Ответы Codex будут приходить сюда.' if value else
                      'Удалённый режим выключен. Уведомления и новые промпты отключены. Текущий запрос, если есть, продолжает работу.')
         elif command in ('/start', '/help'):
-            self.say('/on — включить удалённый режим\n/off — выключить\n/new — новый чат\n/chats — последние чаты\n/use ID — выбрать чат\n/status — состояние\n/limits — лимиты Codex\n/stop — остановить\n/approve ID или /decline ID — разрешение\n/queue — очередь и пауза\n/files — файлы последнего ответа\n/file_ID — скачать конкретный файл\n/guide — подробная инструкция\n/answer ID текст — свой ответ на вопрос\nПромпт: текст, одно изображение или файл до 20 МБ. Подпись — задание. Голос: диктовка клавиатуры телефона.\nНе запускай тот же чат одновременно в VS Code.',
+            self.say(HELP_TEXT,
                 markup={'inline_keyboard': [[{'text': '📖 Инструкция', 'callback_data': 'guide:open'}]]} if command == '/help' else None)
         elif command == '/answer':
             key, _, answer = argument.partition(' ')
