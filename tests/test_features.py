@@ -168,6 +168,37 @@ class Tests(unittest.TestCase):
             b.callback({'id':'callback','from':{'id':123},'message':{'chat':{'id':123}},'data':'guide:open'})
         self.assertIn('инструкция пользователя',b.said[-1][0]);self.assertFalse(b.queue_items)
 
+    def test_new_general_chat_needs_no_project_lookup_and_is_single_use(self):
+        b,ipc=self.bot();folder=self.root/'general-chat'
+        b.call=lambda *a:self.fail('general chat must not query projects')
+        with patch.object(bridge,'enabled',return_value=True), patch.object(bridge,'GENERAL_CHAT',folder), patch.object(bridge,'create_chat',return_value={'id':'new-general'}) as create, patch.object(bridge,'open_in_vscode',return_value=True):
+            b.new_chat_choices();self.assertFalse(folder.exists())
+            keys=b.state['new_chat_kinds'];self.assertEqual(set(keys.values()),{'general','project'})
+            key=next(k for k,v in keys.items() if v=='general')
+            b.new_chat_kind(key)
+            create.assert_called_once_with(str(folder));self.assertEqual(b.state['thread'],'new-general')
+            self.assertIn('Общий чат создан',b.said[-1][0]);self.assertNotIn(str(folder),b.said[-1][0])
+            b.new_chat_kind(key);self.assertEqual(create.call_count,1)
+    def test_new_project_filters_general_and_duplicate_folders(self):
+        b,ipc=self.bot();general=self.root/'general';general.mkdir();sub=general/'sub';sub.mkdir();project=self.root/'work';project.mkdir()
+        b.call=lambda m,p:{'data':[{'cwd':str(general)},{'cwd':str(project)},{'cwd':str(project)},{'cwd':str(sub)}]}
+        with patch.object(bridge,'enabled',return_value=True),patch.object(bridge,'GENERAL_CHAT',general),patch.object(bridge,'create_chat',return_value={'id':'new-project'}) as create,patch.object(bridge,'open_in_vscode',return_value=True):
+            b.new_chat_choices();key=next(k for k,v in b.state['new_chat_kinds'].items() if v=='project')
+            b.new_chat_kind(key);self.assertEqual(list(b.state['new_chat_choices'].values()),[str(project)])
+            self.assertIn('Выбери проект',b.said[-1][0]);create.assert_not_called()
+            b.new_chat_selected(next(iter(b.state['new_chat_choices'])))
+            create.assert_called_once_with(str(project));self.assertEqual(b.state['thread'],'new-project')
+    def test_new_chat_cancel_off_and_busy(self):
+        b,ipc=self.bot()
+        with patch.object(bridge,'enabled',return_value=True),patch.object(bridge,'create_chat') as create:
+            b.new_chat_choices();key=next(iter(b.state['new_chat_kinds']))
+            b.new_chat_selected('cancel');self.assertNotIn('new_chat_kinds',b.state)
+            b.new_chat_kind(key);create.assert_not_called()
+            b.active={'turnId':'busy'};b.new_chat_choices();self.assertNotIn('new_chat_kinds',b.state)
+        b.active=None
+        with patch.object(bridge,'enabled',return_value=False):
+            b.new_chat_choices();self.assertNotIn('new_chat_kinds',b.state)
+
     def test_unauthorized_messages_and_callbacks(self):
         b,ipc=self.bot();b.message({'chat':{'id':999,'type':'private'},'text':'run'});self.assertFalse(b.queue_items)
         with patch.object(bridge,'api') as api:

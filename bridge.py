@@ -21,6 +21,7 @@ from media import attachment, download, file_prompt
 from vscode_ipc import VSCodeIPC, IpcError, turn_start_params
 
 STATE = CONFIG.with_name('state.json')
+GENERAL_CHAT = Path.home() / 'Library/Application Support/CodexRemotePult/general-chat'
 
 
 class Bridge(Features):
@@ -270,27 +271,61 @@ class Bridge(Features):
         self.save()
         remember(thread_id, state.get('title'), cwd)
 
-    def new_chat_choices(self):
+    def new_chat_allowed(self):
         if not enabled():
             self.say('Сначала включи удалённый режим: /on.')
-            return
+            return False
         if self.active:
             self.say('Дождись завершения текущего запроса или нажми «Остановить запрос».')
+            return False
+        return True
+
+    def new_chat_choices(self):
+        if not self.new_chat_allowed():
+            return
+        self.state.pop('new_chat_choices', None)
+        kinds = {uuid.uuid4().hex[:16]: kind for kind in ('general', 'project')}
+        self.state['new_chat_kinds'] = kinds
+        self.save()
+        buttons = [[{'text': 'Общий чат' if kind == 'general' else 'Чат в проекте',
+                     'callback_data': 'newmode:' + key}] for key, kind in kinds.items()]
+        buttons.append([{'text': 'Отмена', 'callback_data': 'new:cancel'}])
+        self.say('Какой чат создать?\nОбщий чат — для вопросов и задач без рабочего проекта.\nЧат в проекте — для работы с его файлами.',
+                 markup={'inline_keyboard': buttons})
+
+    def new_chat_kind(self, key):
+        if not self.new_chat_allowed():
+            return
+        kind = self.state.get('new_chat_kinds', {}).get(key)
+        if kind not in ('general', 'project'):
+            self.say('Меню устарело. Нажми «Новый чат» ещё раз.')
+            return
+        self.state.pop('new_chat_kinds', None)
+        self.save()
+        if kind == 'project':
+            self.new_chat_projects()
+            return
+        try:
+            GENERAL_CHAT.mkdir(parents=True, exist_ok=True, mode=0o700)
+        except OSError:
+            raise RuntimeError('Не удалось подготовить общий чат. Проверь доступ к папке приложения на Mac.') from None
+        # Keep the general workspace away from the bot/project AGENTS.md.
+        choice = uuid.uuid4().hex[:16]
+        self.state['new_chat_choices'] = {choice: str(GENERAL_CHAT.resolve())}
+        self.save()
+        self.new_chat_selected(choice)
+
+    def new_chat_projects(self):
+        if not self.new_chat_allowed():
             return
         threads = self.call('thread/list', {'limit': 50, 'sortKey': 'updated_at', 'sortDirection': 'desc'}).get('data', [])
-        paths = []
-        selected = self.state.get('thread')
-        if selected:
-            current = self.call('thread/read', {'threadId': selected})['thread'].get('cwd')
-            if current:
-                paths.append(current)
-        paths.extend(t.get('cwd') for t in threads)
+        paths = [t.get('cwd') for t in threads]
         choices, buttons = {}, []
         for cwd in paths:
             if not cwd or not Path(cwd).is_dir():
                 continue
             cwd = str(Path(cwd).resolve())
-            if cwd in choices.values():
+            if Path(cwd).is_relative_to(GENERAL_CHAT.resolve()) or cwd in choices.values():
                 continue
             key = uuid.uuid4().hex[:16]
             choices[key] = cwd
@@ -304,12 +339,13 @@ class Bridge(Features):
             self.say('Доступных папок в недавних чатах нет. Сначала открой проект в VS Code.')
             return
         buttons.append([{'text': 'Отмена', 'callback_data': 'new:cancel'}])
-        self.say('В какой папке создать новый чат? Первая — папка выбранной беседы.',
+        self.say('Выбери проект для нового чата:',
                  markup={'inline_keyboard': buttons})
 
     def new_chat_selected(self, key):
         if key == 'cancel':
             self.state.pop('new_chat_choices', None)
+            self.state.pop('new_chat_kinds', None)
             self.save()
             self.say('Создание чата отменено.')
             return
@@ -330,7 +366,9 @@ class Bridge(Features):
         self.state['thread'], self.state['cwd'] = thread['id'], cwd
         self.save()
         opened = open_in_vscode(thread['id'])
-        self.say('➕ Новый чат создан и выбран.\nПапка: '+cwd+'\nЧат: '+thread['id']+
+        description = ('➕ Общий чат создан и выбран.' if Path(cwd).resolve() == GENERAL_CHAT.resolve()
+                       else '➕ Чат в проекте создан и выбран.\nПроект: ' + Path(cwd).name)
+        self.say(description+'\nЧат: '+thread['id']+
                  ('\nОтправлена команда открытия в VS Code. Теперь отправь первый промпт.' if opened else
                   '\nНе удалось открыть VS Code автоматически. Открой этот чат в Codex, затем отправь промпт.'))
 
@@ -394,6 +432,9 @@ class Bridge(Features):
             return
         if action == 'file':
             self.deliver_file(key)
+            return
+        if action == 'newmode':
+            self.new_chat_kind(key)
             return
         if action == 'new':
             self.new_chat_selected(key)
