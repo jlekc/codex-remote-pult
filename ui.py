@@ -3,10 +3,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 MODE_ON = '🟢 Включён · выключить'
-MODE_OFF = '🔕 Выключен · включить'
+MODE_OFF = '🔴 Выключен · включить'
 
 BUTTONS = {
     MODE_ON: '/off', MODE_OFF: '/on',
+    '🔕 Выключен · включить': '/on',
     '🟢 Включить': '/on', '🔕 Выключить': '/off',
     '📊 Статус': '/status', '📈 Лимиты': '/limits',
     '💬 Выбрать чат': '/chats', '⏹ Остановить запрос': '/stop',
