@@ -1,5 +1,4 @@
 """Forward real request_user_input forms to their original VS Code owner."""
-import json
 import time
 import uuid
 from chat_store import bind_question, question_reply, title_for
@@ -24,7 +23,9 @@ class Questions:
         if not enabled():
             return
         for request in live:
-            if any(g['thread'] == thread and g['owner'] == owner and g['request'] == request
+            if any(g['thread'] == thread and g['owner'] == owner
+                   and g['request'].get('id') == request.get('id')
+                   and g['request'].get('params') == request.get('params')
                    for g in self.question_groups.values()):
                 continue
             questions = request.get('params', {}).get('questions', [])

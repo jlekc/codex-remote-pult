@@ -304,7 +304,7 @@ class Tests(unittest.TestCase):
         self.assertFalse(ipc.sent)
     def test_question_repeated_snapshots_no_duplicates_and_restart_reannounces(self):
         b,ipc=self.bot();r,key=self.form(b);count=len(b.said)
-        self.snapshot(b,thread='B',requests=[r]);self.assertEqual(len(b.said),count)
+        self.snapshot(b,thread='B',requests=[dict(r,completed=False)]);self.assertEqual(len(b.said),count)
         b.init_features();self.snapshot(b,thread='B',requests=[r])
         self.assertEqual(len(b.said),count+1)
         b.answer_question(key,answer='old');self.assertFalse(ipc.sent)
