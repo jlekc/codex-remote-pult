@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import uuid
 
 ROOT = Path(__file__).resolve().parent
 DB = ROOT/'messages.sqlite3'
@@ -17,6 +18,7 @@ def connection():
     try:
         conn.execute('CREATE TABLE IF NOT EXISTS messages(chat TEXT, message TEXT, thread TEXT, PRIMARY KEY(chat,message))')
         conn.execute('CREATE TABLE IF NOT EXISTS threads(id TEXT PRIMARY KEY, title TEXT, cwd TEXT, answer TEXT)')
+        conn.execute('CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY, thread TEXT, cwd TEXT, path TEXT, UNIQUE(thread,cwd,path))')
         yield conn
         conn.commit()
     finally:
@@ -78,3 +80,21 @@ def reply_thread(chat, reply):
     text=reply.get('text') or reply.get('caption') or ''
     match=re.search(r'^Чат: ([A-Za-z0-9_-]+)$',text,re.MULTILINE)
     return match.group(1) if match else None
+
+
+def register_download(thread, cwd, path):
+    with connection() as c:
+        row = c.execute('SELECT id FROM downloads WHERE thread=? AND cwd=? AND path=?',
+                        (thread, str(cwd), str(path))).fetchone()
+        if row:
+            return row[0]
+        key = uuid.uuid4().hex[:16]
+        c.execute('INSERT OR IGNORE INTO downloads VALUES (?,?,?,?)', (key, thread, str(cwd), str(path)))
+        return c.execute('SELECT id FROM downloads WHERE thread=? AND cwd=? AND path=?',
+                         (thread, str(cwd), str(path))).fetchone()[0]
+
+
+def download_entry(key):
+    with connection() as c:
+        row = c.execute('SELECT thread,cwd,path FROM downloads WHERE id=?', (key,)).fetchone()
+    return dict(zip(('thread','cwd','path'), row)) if row else None

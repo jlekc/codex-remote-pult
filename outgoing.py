@@ -6,7 +6,7 @@ import urllib.request
 from urllib.parse import unquote
 import uuid
 from notify import tls_context
-from chat_store import bind
+from chat_store import bind, register_download
 
 MAX_BYTES=50*1024*1024
 
@@ -59,3 +59,17 @@ def send_document(config,path,cwd,thread,title):
     except (OSError,ValueError):
         raise RuntimeError('Не удалось отправить файл в Telegram. Проверь сеть и повтори.') from None
     bind(config['chat_id'],data['result']['message_id'],thread)
+
+
+def file_offer(answer, cwd, thread):
+    paths = files_in(answer, cwd)
+    if not paths or not thread:
+        return None
+    lines = ['Скачать готовые файлы:']
+    buttons = []
+    for path in paths:
+        key = register_download(thread, cwd, path)
+        label = Path(path).name
+        lines.append(label[:80] + ' — /file_' + key)
+        buttons.append([{'text': '📥 ' + label[:55], 'callback_data': 'file:' + key}])
+    return '\n'.join(lines), {'inline_keyboard': buttons}

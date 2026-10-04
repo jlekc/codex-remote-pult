@@ -102,6 +102,15 @@ def send(config, event, force=False):
                 'chat_id': config['chat_id'], 'text': text,
                 'link_preview_options': {'is_disabled': True}})
             bind(config['chat_id'], result.get('message_id'), thread)
+        if force or enabled():
+            from outgoing import file_offer
+            offer = file_offer(answer, event.get('cwd'), thread)
+            if offer:
+                text, markup = offer
+                text += '\nБеседа: ' + title_for(thread) + '\nЧат: ' + str(thread)
+                result = api(config['token'], 'sendMessage', {'chat_id': config['chat_id'],
+                    'text': text, 'reply_markup': markup})
+                bind(config['chat_id'], result.get('message_id'), thread)
     except Exception:
         if receipt:
             receipt.unlink(missing_ok=True)

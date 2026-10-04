@@ -165,7 +165,7 @@ class Bridge(Features):
             self.say('Удалённый режим включён. Ответы Codex будут приходить сюда.' if value else
                      'Удалённый режим выключен. Уведомления и новые промпты отключены. Текущий запрос, если есть, продолжает работу.')
         elif command in ('/start', '/help'):
-            self.say('/on — включить удалённый режим\n/off — выключить\n/new — новый чат\n/chats — последние чаты\n/use ID — выбрать чат\n/status — состояние\n/limits — лимиты Codex\n/stop — остановить\n/approve ID или /decline ID — разрешение\n/queue — очередь и пауза\n/files — файлы последнего ответа\n/guide — подробная инструкция\nПромпт: текст, одно изображение или файл до 20 МБ. Подпись — задание. Голос: диктовка клавиатуры телефона.\nНе запускай тот же чат одновременно в VS Code.',
+            self.say('/on — включить удалённый режим\n/off — выключить\n/new — новый чат\n/chats — последние чаты\n/use ID — выбрать чат\n/status — состояние\n/limits — лимиты Codex\n/stop — остановить\n/approve ID или /decline ID — разрешение\n/queue — очередь и пауза\n/files — файлы последнего ответа\n/file_ID — скачать конкретный файл\n/guide — подробная инструкция\nПромпт: текст, одно изображение или файл до 20 МБ. Подпись — задание. Голос: диктовка клавиатуры телефона.\nНе запускай тот же чат одновременно в VS Code.',
                 markup={'inline_keyboard': [[{'text': '📖 Инструкция', 'callback_data': 'guide:open'}]]} if command == '/help' else None)
         elif command == '/guide':
             try:
@@ -195,6 +195,8 @@ class Bridge(Features):
             self.decide_approval(argument, command == '/approve')
         elif command == '/queue':
             self.show_queue()
+        elif re.fullmatch(r'/file_[0-9a-f]{16}(?:@[A-Za-z0-9_]+)?', command):
+            self.deliver_file(command.split('@',1)[0][6:])
         elif command == '/files':
             self.show_files(message)
         elif command == '/stop':

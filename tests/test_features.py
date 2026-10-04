@@ -125,6 +125,41 @@ class Tests(unittest.TestCase):
             self.assertIn(b'name="document"',payload);self.assertIn(b'hello',payload);self.assertIn('Чат: A'.encode(),payload)
             self.assertEqual(chat_store.reply_thread(123,{'message_id':123}), 'A')
         finally:outside.unlink(missing_ok=True)
+    def test_notification_offers_specific_file_buttons_and_commands(self):
+        p=self.root/'готово.txt';p.write_text('hello')
+        sent=[]
+        with patch.object(notify,'api',side_effect=lambda t,m,d: (sent.append(d) or {'message_id':len(sent)})):
+            notify.send({'token':'dummy','chat_id':123},{'thread-id':'B','cwd':str(self.root),
+                'last-assistant-message':f'[готово]({p})'},force=True)
+        self.assertEqual(len(sent),2)
+        key=sent[-1]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1]
+        self.assertIn('/file_'+key,sent[-1]['text'])
+        self.assertEqual(chat_store.download_entry(key)['thread'],'B')
+        self.assertEqual(chat_store.reply_thread(123,{'message_id':2}),'B')
+    def test_direct_file_command_survives_new_bridge_and_chat_selection(self):
+        p=self.root/'ready.txt';p.write_text('hello')
+        offer=outgoing.file_offer(f'[file]({p})',str(self.root),'B')
+        key=offer[1]['inline_keyboard'][0][0]['callback_data'].split(':')[1]
+        b,ipc=self.bot();b.state['thread']='C'
+        with patch.object(features,'send_document') as send:
+            b.message(self.msg('/file_'+key))
+            self.assertEqual(send.call_args.args[3],'B')
+            self.assertEqual(send.call_args.args[1],str(p))
+        self.assertFalse(b.queue_items)
+        again=outgoing.file_offer(f'[file]({p})',str(self.root),'B')
+        self.assertEqual(again,offer)
+    def test_direct_file_unknown_off_unauthorized_and_deleted(self):
+        p=self.root/'ready.txt';p.write_text('hello')
+        key=chat_store.register_download('B',str(self.root),str(p))
+        b,ipc=self.bot()
+        with patch.object(features,'send_document') as send:
+            b.message({'chat':{'id':999,'type':'private'},'text':'/file_'+key})
+            with patch.object(features,'enabled',return_value=False):b.message(self.msg('/file_'+key))
+            b.message(self.msg('/file_'+'0'*16))
+            send.assert_not_called()
+        p.unlink()
+        with self.assertRaisesRegex(RuntimeError,'Файл недоступен'):
+            b.message(self.msg('/file_'+key))
     def test_file_network_error_has_no_token(self):
         p=self.root/'result.txt';p.write_text('hi')
         with patch.object(outgoing.urllib.request,'urlopen',side_effect=OSError('secret token')):

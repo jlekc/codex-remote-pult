@@ -201,23 +201,16 @@ class Features:
         if not paths:
             self.say('В последнем ответе этой беседы нет доступных ссылок на файлы. Попроси Codex дать ссылку на готовый файл.')
             return
-        choices=self.state.setdefault('file_choices',{})
-        buttons=[]
-        from pathlib import Path
-        for path in paths:
-            key=uuid.uuid4().hex[:16]
-            choices[key]={'path':path,'cwd':data['cwd'],'thread':thread}
-            buttons.append([{'text':Path(path).name[:60],'callback_data':'file:'+key}])
-        while len(choices)>100:
-            choices.pop(next(iter(choices)))
-        self.save()
-        self.say('Файлы из последнего ответа: '+title_for(thread),thread=thread,markup={'inline_keyboard':buttons})
+        from outgoing import file_offer
+        text, markup = file_offer(data.get('answer'), data['cwd'], thread)
+        self.say(text+'\nБеседа: '+title_for(thread),thread=thread,markup=markup)
 
     def deliver_file(self,key):
         if not enabled():
             self.say('Сначала включи удалённый режим: /on.')
             return
-        entry=self.state.get('file_choices',{}).get(key)
+        from chat_store import download_entry
+        entry=download_entry(key) or self.state.get('file_choices',{}).get(key)
         if not entry:
             self.say('Список файлов устарел. Нажми «Файлы» ещё раз.')
             return
