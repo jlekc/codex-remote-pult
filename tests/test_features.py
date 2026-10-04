@@ -28,7 +28,7 @@ class Tests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.root=Path(self.temp.name).resolve()
-        self.patches=[patch.object(chat_store,'DB',self.root/'messages.sqlite3'),patch.dict(os.environ,{'CODEX_HOME':str(self.root)}),patch.object(features,'enabled',return_value=True)]
+        self.patches=[patch.object(chat_store,'DB',self.root/'messages.sqlite3'),patch.dict(os.environ,{'CODEX_HOME':str(self.root)}),patch.object(features,'enabled',return_value=True),patch('questions.enabled',return_value=True)]
         for p in self.patches:p.start()
     def tearDown(self):
         for p in reversed(self.patches):p.stop()
@@ -253,6 +253,65 @@ class Tests(unittest.TestCase):
                 self.assertEqual(markup['keyboard'][0],[label])
                 self.assertEqual(ui.BUTTONS[label],'/off' if value else '/on')
 
+    def form(self,b, questions=None):
+        questions=questions or [{'id':'pick','header':'Выбор','question':'Какой вариант?',
+            'options':[{'label':label,'description':'Описание'} for label in ['Первый','Второй','Третий','Четвёртый']]}]
+        r={'id':42,'method':'item/tool/requestUserInput','params':{'questions':questions}}
+        self.snapshot(b,thread='B',requests=[r])
+        return r,next(iter(b.question_keys))
+    def test_question_four_buttons_custom_and_original_owner(self):
+        b,ipc=self.bot();r,key=self.form(b)
+        buttons=b.said[-1][1]['markup']['inline_keyboard']
+        self.assertEqual(len(buttons),5)
+        self.assertEqual(buttons[-1][0]['text'],'✍️ Свой ответ')
+        b.state['thread']='C';b.question_callback(key+':2')
+        method,params,kwargs=ipc.sent[0]
+        self.assertEqual(method,'thread-follower-submit-user-input')
+        self.assertEqual(params,{'conversationId':'B','requestId':42,'response':{'answers':{'pick':{'answers':['Третий']}}}})
+        self.assertEqual(kwargs['target'],'owner')
+        b.question_callback(key+':2');self.assertEqual(len(ipc.sent),1)
+    def test_question_custom_button_reply_and_command(self):
+        for route in ['reply','command']:
+            b,ipc=self.bot();r,key=self.form(b)
+            b.question_callback(key+':custom')
+            self.assertTrue(b.said[-1][1]['markup']['force_reply'])
+            chat_store.bind_question(123,77,key)
+            message=self.msg('Свой вариант',reply_to_message={'message_id':77}) if route=='reply' else self.msg('/answer '+key+' Свой вариант')
+            b.message(message)
+            self.assertEqual(ipc.sent[0][1]['response'],{'answers':{'pick':{'answers':['Свой вариант']}}})
+            self.assertFalse(b.queue_items)
+    def test_question_multiple_answers_submit_only_when_complete(self):
+        b,ipc=self.bot();r,key=self.form(b,questions=[
+            {'id':'a','question':'Первый вопрос','header':'Первый'},
+            {'id':'b','question':'Второй вопрос','header':'Второй'}])
+        keys=list(b.question_keys)
+        b.answer_question(keys[0],answer='Один');self.assertFalse(ipc.sent)
+        b.answer_question(keys[0],answer='Повтор');self.assertFalse(ipc.sent)
+        b.answer_question(keys[1],answer='Два')
+        self.assertEqual(ipc.sent[0][1]['response']['answers'],{'a':{'answers':['Один']},'b':{'answers':['Два']}})
+    def test_question_off_stale_resolved_and_unauthorized(self):
+        import questions
+        b,ipc=self.bot();r,key=self.form(b)
+        with patch.object(questions,'enabled',return_value=False):b.answer_question(key,answer='off')
+        b.snapshots['B']['received']-=20;b.answer_question(key,answer='stale')
+        self.assertEqual(ipc.followed,['B']);self.assertFalse(ipc.sent)
+        self.snapshot(b,thread='B',requests=[r]);chat_store.bind_question(123,55,key)
+        b.message({'chat':{'id':999,'type':'private'},'text':'bad','reply_to_message':{'message_id':55}})
+        with patch.object(bridge,'api') as api:
+            b.callback({'from':{'id':999},'message':{'chat':{'id':123}},'data':'question:'+key+':0','id':'x'})
+            api.assert_not_called()
+        self.snapshot(b,thread='B',requests=[]);b.answer_question(key,answer='resolved')
+        self.assertFalse(ipc.sent)
+    def test_question_repeated_snapshots_no_duplicates_and_restart_reannounces(self):
+        b,ipc=self.bot();r,key=self.form(b);count=len(b.said)
+        self.snapshot(b,thread='B',requests=[r]);self.assertEqual(len(b.said),count)
+        b.init_features();self.snapshot(b,thread='B',requests=[r])
+        self.assertEqual(len(b.said),count+1)
+        b.answer_question(key,answer='old');self.assertFalse(ipc.sent)
+    def test_secret_question_not_exposed_and_cannot_be_answered_in_telegram(self):
+        b,ipc=self.bot();r,key=self.form(b,questions=[{'id':'secret','header':'Секрет','question':'SECRET_PROMPT','isSecret':True}])
+        self.assertNotIn('SECRET_PROMPT',b.said[-1][0])
+        b.answer_question(key,answer='value');self.assertFalse(ipc.sent)
     def test_unauthorized_messages_and_callbacks(self):
         b,ipc=self.bot();b.message({'chat':{'id':999,'type':'private'},'text':'run'});self.assertFalse(b.queue_items)
         with patch.object(bridge,'api') as api:

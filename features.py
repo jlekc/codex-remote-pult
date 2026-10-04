@@ -7,6 +7,7 @@ from chat_store import remember, title_for, details, reply_thread
 from mode import enabled
 from outgoing import files_in, send_document
 from vscode_ipc import IpcError
+from questions import Questions, QUESTION_METHOD
 
 METHODS={'item/commandExecution/requestApproval':'thread-follower-command-approval-decision',
          'item/fileChange/requestApproval':'thread-follower-file-approval-decision',
@@ -15,8 +16,9 @@ METHODS={'item/commandExecution/requestApproval':'thread-follower-command-approv
 class WaitForChat(RuntimeError):
     pass
 
-class Features:
+class Features(Questions):
     def init_features(self):
+        self.init_questions()
         self.snapshots={}
         self.snapshot_poll=0
         self.queue_poll=0
@@ -139,6 +141,7 @@ class Features:
             return
         self.snapshots[thread]={'state':state,'owner':event.get('sourceClientId'),'received':time.monotonic()}
         remember(thread,state.get('title'),state.get('cwd'))
+        self.observe_questions(thread,state,event.get('sourceClientId'))
         requests=[r for r in state.get('requests',[]) if not r.get('completed') and r.get('method') in METHODS]
         live={json.dumps(r.get('id'),sort_keys=True) for r in requests}
         for key,value in list(self.approvals.items()):

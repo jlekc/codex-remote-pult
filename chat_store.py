@@ -19,6 +19,7 @@ def connection():
         conn.execute('CREATE TABLE IF NOT EXISTS messages(chat TEXT, message TEXT, thread TEXT, PRIMARY KEY(chat,message))')
         conn.execute('CREATE TABLE IF NOT EXISTS threads(id TEXT PRIMARY KEY, title TEXT, cwd TEXT, answer TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY, thread TEXT, cwd TEXT, path TEXT, UNIQUE(thread,cwd,path))')
+        conn.execute('CREATE TABLE IF NOT EXISTS question_replies(chat TEXT, message TEXT, question_key TEXT, PRIMARY KEY(chat,message))')
         yield conn
         conn.commit()
     finally:
@@ -98,3 +99,17 @@ def download_entry(key):
     with connection() as c:
         row = c.execute('SELECT thread,cwd,path FROM downloads WHERE id=?', (key,)).fetchone()
     return dict(zip(('thread','cwd','path'), row)) if row else None
+
+
+def bind_question(chat, message, key):
+    if message is not None:
+        with connection() as c:
+            c.execute('INSERT OR REPLACE INTO question_replies VALUES (?,?,?)',
+                      (str(chat),str(message),key))
+
+
+def question_reply(chat, message):
+    with connection() as c:
+        row=c.execute('SELECT question_key FROM question_replies WHERE chat=? AND message=?',
+                      (str(chat),str(message))).fetchone()
+    return row[0] if row else None

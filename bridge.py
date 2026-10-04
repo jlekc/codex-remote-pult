@@ -87,6 +87,7 @@ class Bridge(Features):
         temp.replace(STATE)
 
     def say(self, text, notification=False, markup=None, thread=None):
+        result = None
         for index, part in enumerate(chunks(text)):
             if notification and not enabled():
                 break
@@ -96,6 +97,7 @@ class Bridge(Features):
                 'text': part, 'link_preview_options': {'is_disabled': True},
                 'reply_markup': markup if markup is not None else keyboard(enabled())})
             bind(self.config['chat_id'], result.get('message_id'), thread)
+        return result
 
     def event(self, event):
         if event.get('type') == 'broadcast':
@@ -140,6 +142,8 @@ class Bridge(Features):
         chat = message.get('chat', {})
         if str(chat.get('id')) != str(self.config['chat_id']) or chat.get('type') != 'private':
             return
+        if self.question_message(message):
+            return
         media_item, _ = attachment(message)
         if not media_item and not message.get('text'):
             if 'voice' in message or 'audio' in message:
@@ -165,8 +169,11 @@ class Bridge(Features):
             self.say('Удалённый режим включён. Ответы Codex будут приходить сюда.' if value else
                      'Удалённый режим выключен. Уведомления и новые промпты отключены. Текущий запрос, если есть, продолжает работу.')
         elif command in ('/start', '/help'):
-            self.say('/on — включить удалённый режим\n/off — выключить\n/new — новый чат\n/chats — последние чаты\n/use ID — выбрать чат\n/status — состояние\n/limits — лимиты Codex\n/stop — остановить\n/approve ID или /decline ID — разрешение\n/queue — очередь и пауза\n/files — файлы последнего ответа\n/file_ID — скачать конкретный файл\n/guide — подробная инструкция\nПромпт: текст, одно изображение или файл до 20 МБ. Подпись — задание. Голос: диктовка клавиатуры телефона.\nНе запускай тот же чат одновременно в VS Code.',
+            self.say('/on — включить удалённый режим\n/off — выключить\n/new — новый чат\n/chats — последние чаты\n/use ID — выбрать чат\n/status — состояние\n/limits — лимиты Codex\n/stop — остановить\n/approve ID или /decline ID — разрешение\n/queue — очередь и пауза\n/files — файлы последнего ответа\n/file_ID — скачать конкретный файл\n/guide — подробная инструкция\n/answer ID текст — свой ответ на вопрос\nПромпт: текст, одно изображение или файл до 20 МБ. Подпись — задание. Голос: диктовка клавиатуры телефона.\nНе запускай тот же чат одновременно в VS Code.',
                 markup={'inline_keyboard': [[{'text': '📖 Инструкция', 'callback_data': 'guide:open'}]]} if command == '/help' else None)
+        elif command == '/answer':
+            key, _, answer = argument.partition(' ')
+            self.answer_question(key, answer=answer)
         elif command == '/guide':
             try:
                 guide = CONFIG.with_name('USER_GUIDE.md').read_text(encoding='utf-8')
@@ -426,6 +433,9 @@ class Bridge(Features):
             return
         api(self.config['token'], 'answerCallbackQuery', {'callback_query_id': callback['id']})
         action, _, key = callback.get('data', '').partition(':')
+        if action == 'question':
+            self.question_callback(key)
+            return
         if action == 'guide':
             self.message({'chat': {'id': self.config['chat_id'], 'type': 'private'}, 'text': '/guide'})
             return

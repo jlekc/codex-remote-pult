@@ -15,6 +15,7 @@
 - Диктовка телефона как обычный текст; изображения и документы до 20 МБ.
 - Сохраняемая общая очередь 20 задач, пауза/удаление и защита от повтора неопределённого запуска.
 - Кнопки разовых command/file/permissions approvals из живых снимков владельца.
+- Вопросы request_user_input: кнопки вариантов, «Свой ответ», reply и /answer; несколько ответов передаются одной формой, после restart спрашиваются заново.
 - Автоматические кнопки файлов и команды /file_ID из Markdown-ссылок; постоянный реестр downloads в SQLite, sendDocument до 50 МБ.
 - Фоновый LaunchAgent и flock одного экземпляра.
 
@@ -34,7 +35,7 @@ Queue.thread неизменен после приёма. Reply message_id и с�
 
 ## Где менять
 
-bridge.py — команды/основной цикл; features.py — очередь/разрешения/файлы; vscode_ipc.py — протокол/input; notify.py — финал/TLS; chat_store.py — названия/reply routing; media.py/outgoing.py — вложения; ui.py — кнопки; new_chat.py — новая беседа; autostart.py — фоновый сервис. USER_GUIDE.md читается /guide прямо с диска.
+bridge.py — команды/основной цикл; features.py — очередь/разрешения/файлы; questions.py — вопросы/ответы; vscode_ipc.py — протокол/input; notify.py — финал/TLS; chat_store.py — названия/reply routing; media.py/outgoing.py — вложения; ui.py — кнопки; new_chat.py — новая беседа; autostart.py — фоновый сервис. USER_GUIDE.md читается /guide прямо с диска.
 
 ## Правила работы
 
