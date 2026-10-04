@@ -13,6 +13,7 @@ import chat_store
 import features
 import notify
 import outgoing
+import ui
 from vscode_ipc import IpcError
 
 class FakeIPC:
@@ -198,6 +199,24 @@ class Tests(unittest.TestCase):
         b.active=None
         with patch.object(bridge,'enabled',return_value=False):
             b.new_chat_choices();self.assertNotIn('new_chat_kinds',b.state)
+
+    def test_mode_button_switches_and_repeated_old_press_is_idempotent(self):
+        b,ipc=self.bot();state={'enabled':False}
+        def set_mode(value):state['enabled']=value
+        with patch.object(bridge,'enabled',side_effect=lambda:state['enabled']),patch.object(bridge,'set_enabled',side_effect=set_mode):
+            b.message(self.msg(ui.MODE_OFF));self.assertTrue(state['enabled'])
+            b.message(self.msg(ui.MODE_OFF));self.assertTrue(state['enabled'])
+            b.message(self.msg(ui.MODE_ON));self.assertFalse(state['enabled'])
+            b.message(self.msg(ui.MODE_ON));self.assertFalse(state['enabled'])
+        self.assertFalse(b.queue_items)
+    def test_reply_keyboard_shows_current_mode_as_single_button(self):
+        b,ipc=self.bot();b.say=bridge.Bridge.say.__get__(b)
+        for value,label in [(False,ui.MODE_OFF),(True,ui.MODE_ON)]:
+            with patch.object(bridge,'enabled',return_value=value),patch.object(bridge,'api',return_value={'message_id':42}) as api:
+                b.say('test')
+                markup=api.call_args.args[2]['reply_markup']
+                self.assertEqual(markup['keyboard'][0],[label])
+                self.assertEqual(ui.BUTTONS[label],'/off' if value else '/on')
 
     def test_unauthorized_messages_and_callbacks(self):
         b,ipc=self.bot();b.message({'chat':{'id':999,'type':'private'},'text':'run'});self.assertFalse(b.queue_items)

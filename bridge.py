@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from notify import CONFIG, api, chunks, send
 from mode import enabled, set_enabled
-from ui import BUTTONS, KEYBOARD, format_limits
+from ui import BUTTONS, keyboard, format_limits
 from runtime import acquire
 from features import Features, WaitForChat
 from chat_store import remember, title_for, bind
@@ -94,7 +94,7 @@ class Bridge(Features):
                 time.sleep(1.1)
             result = api(self.config['token'], 'sendMessage', {'chat_id': self.config['chat_id'],
                 'text': part, 'link_preview_options': {'is_disabled': True},
-                'reply_markup': markup if markup is not None else KEYBOARD})
+                'reply_markup': markup if markup is not None else keyboard(enabled())})
             bind(self.config['chat_id'], result.get('message_id'), thread)
 
     def event(self, event):

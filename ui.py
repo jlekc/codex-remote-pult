@@ -2,18 +2,24 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+MODE_ON = '🟢 Включён · выключить'
+MODE_OFF = '🔕 Выключен · включить'
+
 BUTTONS = {
+    MODE_ON: '/off', MODE_OFF: '/on',
     '🟢 Включить': '/on', '🔕 Выключить': '/off',
     '📊 Статус': '/status', '📈 Лимиты': '/limits',
     '💬 Выбрать чат': '/chats', '⏹ Остановить запрос': '/stop',
     '📋 Очередь': '/queue', '📎 Файлы': '/files',
     '➕ Новый чат': '/new', '❓ Помощь': '/help',
 }
-KEYBOARD = {'keyboard': [
-    ['🟢 Включить', '🔕 Выключить'], ['📊 Статус', '📈 Лимиты'],
-    ['💬 Выбрать чат', '⏹ Остановить запрос'], ['➕ Новый чат', '📋 Очередь'], ['📎 Файлы', '❓ Помощь']],
-    'resize_keyboard': True, 'is_persistent': True,
-    'input_field_placeholder': 'Промпт или кнопка управления'}
+def keyboard(is_enabled):
+    return {'keyboard': [
+        [MODE_ON if is_enabled else MODE_OFF], ['📊 Статус', '📈 Лимиты'],
+        ['💬 Выбрать чат', '⏹ Остановить запрос'], ['➕ Новый чат', '📋 Очередь'],
+        ['📎 Файлы', '❓ Помощь']],
+        'resize_keyboard': True, 'is_persistent': True,
+        'input_field_placeholder': 'Промпт или кнопка управления'}
 
 
 def format_limits(result):
