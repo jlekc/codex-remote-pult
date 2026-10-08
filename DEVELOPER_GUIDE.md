@@ -384,3 +384,19 @@ Agent snapshots не пересылаются; конечные ответы т�
 с is_persistent=True к каждой части конечного ответа. Состояние кнопки
 /on-/off берётся из enabled() при отправке. Отдельного сообщения ради
 панели нет; удаление временных статусов не удаляет конечный ответ с панелью.
+
+
+Асинхронные вопросы (09.10.2026): questions.live_questions объединяет
+item/tool/requestUserInput и agentMessage.questions из turns / canonical
+turnHistory. questionItemId совпадает с установленным UI:
+JSON.stringify(["request_user_input_async", sourceItemId, questionIndex]).
+Принятый userMessage/steeringUserMessage с send_user_message_question_reply
+закрывает вопрос; pending/rejected steering его не закрывает. Первый snapshot
+не выгружает архивные turns. После успешной отправки собственный вопрос
+не объявляется повторно до обновления snapshot.
+Ответ на async-форму идёт через thread-follower-steer-turn v1 при inProgress
+(с restoreMessage/context исходного проекта) или thread-follower-start-turn v2
+после окончания, всегда исходному owner. clientUserMessageId сохраняется
+в mirror_phone до dispatch. Блокирующие формы сохраняют прежний
+thread-follower-submit-user-input. Установленные extension assets проверены;
+63 теста прошли. Живой цикл асинхронного вопроса пользователем ещё не подтверждён.

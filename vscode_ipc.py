@@ -18,7 +18,7 @@ VERSIONS = {'initialize': 0, 'thread-owner-discovery': 1,
     'thread-follower-command-approval-decision': 1,
     'thread-follower-file-approval-decision': 1,
     'thread-follower-permissions-request-approval-response': 1,
-    'thread-follower-submit-user-input': 1}
+    'thread-follower-submit-user-input': 1, 'thread-follower-steer-turn': 1}
 
 
 def turn_start_params(thread, text, images=None):
