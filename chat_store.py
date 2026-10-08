@@ -20,6 +20,9 @@ def connection():
         conn.execute('CREATE TABLE IF NOT EXISTS threads(id TEXT PRIMARY KEY, title TEXT, cwd TEXT, answer TEXT)')
         conn.execute('CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY, thread TEXT, cwd TEXT, path TEXT, UNIQUE(thread,cwd,path))')
         conn.execute('CREATE TABLE IF NOT EXISTS question_replies(chat TEXT, message TEXT, question_key TEXT, PRIMARY KEY(chat,message))')
+        conn.execute('CREATE TABLE IF NOT EXISTS progress_runs(chat TEXT, queue TEXT, thread TEXT, turn TEXT, PRIMARY KEY(chat,queue))')
+        conn.execute('CREATE TABLE IF NOT EXISTS progress_notices(chat TEXT, queue TEXT, message INTEGER, PRIMARY KEY(chat,message))')
+        conn.execute('CREATE TABLE IF NOT EXISTS progress_finals(chat TEXT, thread TEXT, turn TEXT, PRIMARY KEY(chat,thread,turn))')
         yield conn
         conn.commit()
     finally:

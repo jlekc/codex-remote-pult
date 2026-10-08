@@ -1,8 +1,8 @@
-"""Layout B using Telegram entities, never interpreting input as HTML."""
+"""Compact author/chat headers using safe Telegram entities."""
 import re
 
 TOP = '━━━━━━━━━━━━━━━━'
-BOTTOM = '┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄'
+
 TOKENS = re.compile(r'```([^\n`]*)\n([\s\S]*?)```|\*\*([^*]+)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\((https?://[^\s)]+)\)')
 
 
@@ -81,30 +81,45 @@ def format_message(text, presentation=None):
                   'Кодекс Пульт — помощь':'❓ Помощь'}
         if first in events:
             event, body = events[first], rest.lstrip('\n')
+    author = (presentation or {}).get('author')
+    if author is None:
+        if event == 'Ты · с компьютера':
+            author = 'user'
+        elif event in ('Агент · ход работы', '✅ Codex завершил ответ'):
+            author = 'agent'
     t = Text()
-    t.add('💬 ' if title else '🤖 ')
-    t.add(title or 'Кодекс Пульт', 'bold')
+    if author:
+        header = ('🟢 ВЫ → АГЕНТ' if author == 'user' else '🔵 АГЕНТ → ВАМ')
+        if title:
+            header += ' · ' + title
+        t.add(header, 'bold')
+    else:
+        t.add('💬 ' if title else '🤖 ')
+        t.add(title or 'Кодекс Пульт', 'bold')
     t.add('\n')
-    if event:
+    t.add(TOP, 'bold')
+    t.add('\n\n')
+    if event and (not author or event not in ('Ты · с компьютера', 'Агент · ход работы', '✅ Codex завершил ответ')):
         t.add(event, 'bold')
-        t.add('\n')
-    t.add(TOP+'\n\n')
+        t.add('\n\n')
     start = t.size
-    t.markdown(body)
+    if author == 'user':
+        # Mirror the user's words literally, including Markdown-like input.
+        t.add(body)
+    else:
+        t.markdown(body)
     end = t.size
-    # Code blocks have their own background; keep them outside quote entities.
-    cursor = start
-    for e in list(t.entities):
-        if e['type'] == 'pre' and e['offset'] >= start:
-            if e['offset'] > cursor:
-                t.entities.append(dict(type='blockquote',offset=cursor,length=e['offset']-cursor))
-            cursor = e['offset']+e['length']
-    if end > cursor:
-        t.entities.append(dict(type='blockquote',offset=cursor,length=end-cursor))
-    t.add('\n\n'+BOTTOM)
-    if meta:
-        t.add('\n⚙️ Технические данные\n')
-        t.add('\n'.join(str(k)+': '+str(v) for k,v in meta), 'italic')
+    if author != 'user':
+        # Code blocks have their own background, separate from quote entities.
+        cursor = start
+        for e in list(t.entities):
+            if e['type'] == 'pre' and e['offset'] >= start:
+                if e['offset'] > cursor:
+                    t.entities.append(dict(type='blockquote',offset=cursor,length=e['offset']-cursor))
+                cursor = e['offset']+e['length']
+        if end > cursor:
+            t.entities.append(dict(type='blockquote',offset=cursor,length=end-cursor))
+    # Routing metadata remains in the local store, not in the visible footer.
     return t.result()
 
 

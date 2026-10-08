@@ -54,6 +54,25 @@ class Tests(unittest.TestCase):
             self.assertLessEqual(len(data['text'].encode('utf-16-le'))//2,4096)
             self.assertEqual(chat_store.reply_thread(123,{'message_id':i+1}), 'A')
         self.assertEqual(''.join(d['text'].split('\n\n',1)[1] for d in sent),answer)
+    def test_desktop_snapshot_does_not_echo_user_or_agent_messages(self):
+        b,ipc=self.bot()
+        state={'id':'A','turns':[{'turnId':'t','status':'completed','items':[
+            {'id':'u','type':'userMessage','content':[{'type':'text','text':'Context from my IDE setup: private tabs'}]},
+            {'id':'c','type':'agentMessage','phase':'commentary','text':'Проверяю'},
+            {'id':'f','type':'agentMessage','phase':'final_answer','text':'Готово'}]}],'requests':[]}
+        b.stream_event({'type':'broadcast','method':'thread-stream-state-changed','version':11,
+            'sourceClientId':'owner','params':{'hostId':'local','conversationId':'A',
+            'change':{'type':'snapshot','conversationState':state}}})
+        self.assertFalse(b.said)
+        self.assertIn('A',b.snapshots)
+    def test_final_hook_and_bridge_send_only_once(self):
+        import delivery
+        sent=[]
+        event={'thread-id':'A','turn-id':'t','last-assistant-message':'Готово'}
+        with patch.object(delivery,'ROOT',self.root/'receipts'),patch.object(notify,'enabled',return_value=True),patch.object(notify,'api',side_effect=lambda *args:(sent.append(args[2]) or {'message_id':len(sent)})):
+            notify.send({'token':'dummy','chat_id':123},event)
+            notify.send({'token':'dummy','chat_id':123},event)
+        self.assertEqual(len(sent),1)
     def test_queue_chat_is_fixed_and_controls_work_while_busy(self):
         b,ipc=self.bot();b.active={'threadId':'A'}
         chat_store.bind(123,99,'B')
@@ -122,20 +141,22 @@ class Tests(unittest.TestCase):
             def urlopen(req,**kw):captured.append(req);return io.BytesIO(json.dumps({'ok':True,'result':{'message_id':123}}).encode())
             with patch.object(outgoing.urllib.request,'urlopen',side_effect=urlopen):outgoing.send_document({'chat_id':123,'token':'dummy'},p,str(self.root),'A','Чат A')
             payload=captured[0].data
-            self.assertIn(b'name="document"',payload);self.assertIn(b'hello',payload);self.assertIn('Чат: A'.encode(),payload)
+            self.assertIn(b'name="document"',payload);self.assertIn(b'hello',payload);self.assertNotIn('Чат: A'.encode(),payload);self.assertNotIn('Технические данные'.encode(),payload)
             self.assertEqual(chat_store.reply_thread(123,{'message_id':123}), 'A')
         finally:outside.unlink(missing_ok=True)
-    def test_notification_offers_specific_file_buttons_and_commands(self):
+    def test_final_answer_does_not_send_additional_file_offer(self):
         p=self.root/'готово.txt';p.write_text('hello')
         sent=[]
         with patch.object(notify,'api',side_effect=lambda t,m,d: (sent.append(d) or {'message_id':len(sent)})):
             notify.send({'token':'dummy','chat_id':123},{'thread-id':'B','cwd':str(self.root),
                 'last-assistant-message':f'[готово]({p})'},force=True)
-        self.assertEqual(len(sent),2)
-        key=sent[-1]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1]
-        self.assertIn('/file_'+key,sent[-1]['text'])
-        self.assertEqual(chat_store.download_entry(key)['thread'],'B')
-        self.assertEqual(chat_store.reply_thread(123,{'message_id':2}),'B')
+        self.assertEqual(len(sent),1)
+        self.assertIn('keyboard',sent[0]['reply_markup'])
+        self.assertTrue(sent[0]['reply_markup']['is_persistent'])
+        self.assertEqual(chat_store.reply_thread(123,{'message_id':1}),'B')
+        b,ipc=self.bot();b.state['thread']='B'
+        b.show_files(self.msg('/files'))
+        self.assertIn('inline_keyboard',b.said[-1][1]['markup'])
     def test_direct_file_command_survives_new_bridge_and_chat_selection(self):
         p=self.root/'ready.txt';p.write_text('hello')
         offer=outgoing.file_offer(f'[file]({p})',str(self.root),'B')
@@ -243,10 +264,12 @@ class Tests(unittest.TestCase):
             b.message(self.msg(ui.MODE_OFF));self.assertTrue(state['enabled'])
             b.message(self.msg(ui.MODE_ON));self.assertFalse(state['enabled'])
             b.message(self.msg(ui.MODE_ON));self.assertFalse(state['enabled'])
+            b.message(self.msg(ui.MODE_TOGGLE));self.assertTrue(state['enabled'])
+            b.message(self.msg(ui.MODE_TOGGLE));self.assertFalse(state['enabled'])
         self.assertFalse(b.queue_items)
-    def test_reply_keyboard_shows_current_mode_as_single_button(self):
+    def test_reply_keyboard_shows_single_toggle_button(self):
         b,ipc=self.bot();b.say=bridge.Bridge.say.__get__(b)
-        for value,label in [(False,ui.MODE_OFF),(True,ui.MODE_ON)]:
+        for value,label in [(False,'🔴 Вкл/Выкл'),(True,'🟢 Вкл/Выкл')]:
             with patch.object(bridge,'enabled',return_value=value),patch.object(bridge,'api',return_value={'message_id':42}) as api:
                 b.say('test')
                 markup=api.call_args.args[2]['reply_markup']

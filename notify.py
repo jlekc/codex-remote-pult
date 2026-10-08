@@ -13,8 +13,10 @@ import urllib.error
 import urllib.request
 from mode import enabled
 from delivery import claim
+import progress
 from chat_store import remember, title_for, bind
 from layout import message_data
+from ui import keyboard
 
 CONFIG = Path(__file__).resolve().with_name('credentials.json')
 
@@ -93,8 +95,10 @@ def send(config, event, force=False):
     parts = list(chunks(answer, limit=3000))
     claimed, receipt = (True, None) if force else claim(event)
     if not claimed:
+        progress.retry(config,event)
         return
     try:
+        progress.before_answer(config,event)
         for index, part in enumerate(parts):
             if not force and not enabled():
                 break
@@ -104,21 +108,16 @@ def send(config, event, force=False):
             result = api(config['token'], 'sendMessage', {
                 'chat_id': config['chat_id'], 'text': text,
                 '_presentation': {'title': title_for(thread) if thread else None,
-                    'event': headline, 'body': part,
+                    'event': headline, 'body': part, 'author': 'agent',
                     'meta': [('Проект', project[:80])] + ([('Чат', str(thread))] if thread else [])
                         + [('Статус', str(status))]
                         + ([('Часть', f'{index+1}/{len(parts)}')] if len(parts)>1 else [])},
-                'link_preview_options': {'is_disabled': True}})
+                'link_preview_options': {'is_disabled': True},
+                'reply_markup': keyboard(enabled())})
             bind(config['chat_id'], result.get('message_id'), thread)
-        if force or enabled():
-            from outgoing import file_offer
-            offer = file_offer(answer, event.get('cwd'), thread)
-            if offer:
-                text, markup = offer
-                text += '\nБеседа: ' + title_for(thread) + '\nЧат: ' + str(thread)
-                result = api(config['token'], 'sendMessage', {'chat_id': config['chat_id'],
-                    'text': text, 'reply_markup': markup})
-                bind(config['chat_id'], result.get('message_id'), thread)
+        else:
+            # For-loop completion proves every part reached Telegram.
+            progress.delivered(config,event)
     except Exception:
         if receipt:
             receipt.unlink(missing_ok=True)

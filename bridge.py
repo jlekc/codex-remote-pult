@@ -15,6 +15,7 @@ from mode import enabled, set_enabled
 from ui import BUTTONS, keyboard, format_limits, HELP_TEXT
 from runtime import acquire
 from features import Features, WaitForChat
+import progress
 from chat_store import remember, title_for, bind
 from layout import service_parts
 from new_chat import create as create_chat, open_in_vscode
@@ -166,15 +167,16 @@ class Bridge(Features):
         else:
             text = BUTTONS.get(text, text)
             command, _, argument = text.partition(' ')
-        if command in ('/on', '/off'):
-            value = command == '/on'
+        if command in ('/on', '/off', '/toggle'):
+            value = not enabled() if command == '/toggle' else command == '/on'
             set_enabled(value)
+            self.mirror.switch()
             if not value:
                 for event in self.approvals.values():
                     if event.get('transport') != 'vscode':
                         self.write({'id': event['id'], 'result': {'decision': 'decline'}})
                 self.approvals.clear()
-            self.say('Удалённый режим включён. Ответы Codex будут приходить сюда.' if value else
+            self.say('Удалённый режим включён. Запросы с компьютера и конечные ответы Codex будут приходить сюда.' if value else
                      'Удалённый режим выключен. Уведомления и новые промпты отключены. Текущий запрос, если есть, продолжает работу.')
         elif command in ('/start', '/help'):
             self.say(HELP_TEXT,
@@ -275,8 +277,10 @@ class Bridge(Features):
         # Record dispatch before sending; a crash/timeout must not replay a task.
         queued['status'] = 'dispatching'
         self.save()
+        params = turn_start_params(thread_id, text, images)
+        self.mirror.phone(thread_id, params['turnStart']['request']['clientUserMessageId'])
         response = ipc.request('thread-follower-start-turn',
-            turn_start_params(thread_id, text, images), target=owner, timeout=40)
+            params, target=owner, timeout=40)
         turn = response.get('result', {}).get('result', {}).get('turn', {})
         if not turn.get('id'):
             raise RuntimeError('VS Code не подтвердил ID запроса. Проверь историю перед повтором.')
@@ -286,6 +290,7 @@ class Bridge(Features):
         self.state['active'] = self.active
         self.state['cwd'] = cwd
         self.save()
+        progress.link(self.config,queued['id'],thread_id,turn['id'])
         remember(thread_id, state.get('title'), cwd)
 
     def new_chat_allowed(self):
@@ -478,6 +483,7 @@ class Bridge(Features):
             while not self.events.empty():
                 self.event(self.events.get())
             self.poll_vscode_turn()
+            progress.sweep(self.config)
             self.drain_queue()
             if self.proc.poll() is not None:
                 raise RuntimeError('Codex остановился')

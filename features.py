@@ -1,6 +1,7 @@
 """Telegram queue, VS Code approval snapshots, and result-file controls."""
 import copy
 import json
+import sqlite3
 import time
 import uuid
 from chat_store import remember, title_for, details, reply_thread
@@ -8,6 +9,8 @@ from mode import enabled
 from outgoing import files_in, send_document
 from vscode_ipc import IpcError
 from questions import Questions, QUESTION_METHOD
+from mirror import DesktopMirror
+import progress
 
 METHODS={'item/commandExecution/requestApproval':'thread-follower-command-approval-decision',
          'item/fileChange/requestApproval':'thread-follower-file-approval-decision',
@@ -19,10 +22,13 @@ class WaitForChat(RuntimeError):
 class Features(Questions):
     def init_features(self):
         self.init_questions()
+        self.mirror = DesktopMirror(self.config)
         self.snapshots={}
         self.snapshot_poll=0
         self.queue_poll=0
         self.queue_items=self.state.setdefault('queue',[])
+        if self.active and self.active.get('queueId') and self.active.get('threadId') and self.active.get('turnId'):
+            progress.link(self.config,self.active['queueId'],self.active['threadId'],self.active['turnId'])
         if self.active and self.active.get('queueId'):
             self.queue_items[:] = [i for i in self.queue_items if i['id'] != self.active['queueId']]
         for item in self.queue_items:
@@ -51,7 +57,8 @@ class Features(Questions):
         item={'id':uuid.uuid4().hex[:16],'thread':thread,'message':copy.deepcopy(message),'status':'pending'}
         self.queue_items.append(item)
         self.save()
-        self.say('В очереди: '+str(len(self.queue_items))+'.\nБеседа: '+title_for(thread)+'\nЧат: '+thread, thread=thread)
+        result=self.say('В очереди: '+str(len(self.queue_items))+'.\nБеседа: '+title_for(thread)+'\nЧат: '+thread, thread=thread)
+        progress.notice(self.config,item['id'],result)
 
     def show_queue(self):
         buttons=[]
@@ -104,7 +111,9 @@ class Features(Questions):
             return
         self.queue_items.pop(0)
         self.save()
-        self.say('Промпт запущен.\nБеседа: '+title_for(item['thread'])+'\nЧат: '+item['thread'], thread=item['thread'])
+        progress.before_start(self.config,item['id'])
+        result=self.say('Промпт запущен.\nБеседа: '+title_for(item['thread'])+'\nЧат: '+item['thread'], thread=item['thread'])
+        progress.notice(self.config,item['id'],result)
 
     def poll_snapshots(self):
         if not enabled():
@@ -141,6 +150,10 @@ class Features(Questions):
             return
         self.snapshots[thread]={'state':state,'owner':event.get('sourceClientId'),'received':time.monotonic()}
         remember(thread,state.get('title'),state.get('cwd'))
+        try:
+            self.mirror.observe(thread,state)
+        except (RuntimeError,OSError,sqlite3.Error):
+            pass  # Retry next snapshot; queue and approvals still work.
         self.observe_questions(thread,state,event.get('sourceClientId'))
         requests=[r for r in state.get('requests',[]) if not r.get('completed') and r.get('method') in METHODS]
         live={json.dumps(r.get('id'),sort_keys=True) for r in requests}
