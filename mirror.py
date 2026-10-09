@@ -71,7 +71,7 @@ class DesktopMirror:
             if pause>0:time.sleep(pause)
             if not enabled():return
             result = api(self.config['token'],'sendMessage',{
-                'chat_id':self.config['chat_id'],'text':part,
+                'chat_id':self.config['chat_id'],'text':part,'_thread':thread,
                 '_presentation':{'title':title_for(thread),'author':'user','event':'Ты · с компьютера','body':part},
                 'link_preview_options':{'is_disabled':True}})
             self.last_send = time.monotonic()

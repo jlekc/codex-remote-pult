@@ -22,3 +22,5 @@ previous-notify.json
 .env
 .env.*
 .venv/
+
+topics.lock

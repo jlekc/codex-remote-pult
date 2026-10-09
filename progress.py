@@ -111,3 +111,13 @@ def before_start(config,queue_id):
                 c.executemany('DELETE FROM progress_notices WHERE chat=? AND message=?',[(chat,m) for m in ids])
     except (RuntimeError,OSError,sqlite3.Error,ValueError):
         pass
+
+
+def confirmed(config, thread, turn):
+    """True only after the entire final answer reached this Telegram chat."""
+    try:
+        with connection() as c:
+            return bool(c.execute('SELECT 1 FROM progress_finals WHERE chat=? AND thread=? AND turn=?',
+                (str(config['chat_id']),thread,turn)).fetchone())
+    except (OSError,sqlite3.Error):
+        return False

@@ -38,6 +38,10 @@ class Features(Questions):
         self.save()
 
     def target_thread(self,message):
+        from topics import thread_for
+        topic=message.get('message_thread_id')
+        if topic:
+            return thread_for(self.config['chat_id'],topic)
         return reply_thread(self.config['chat_id'],message.get('reply_to_message',{})) or self.state.get('thread')
 
     def enqueue(self,message):
@@ -51,7 +55,8 @@ class Features(Questions):
         if message.get('media_group_id'):
             self.say('Альбомы пока не поддерживаются. Отправь одно вложение отдельно.')
             return
-        if len(self.queue_items)>=20:
+        native=getattr(self,'native_queue',None)
+        if len(self.queue_items)+(len(native.receipts) if native else 0)>=20:
             self.say('В очереди уже 20 промптов. Удали ненужные через /queue.')
             return
         item={'id':uuid.uuid4().hex[:16],'thread':thread,'message':copy.deepcopy(message),'status':'pending'}
@@ -61,6 +66,9 @@ class Features(Questions):
         progress.notice(self.config,item['id'],result)
 
     def show_queue(self):
+        native=getattr(self,'native_queue',None)
+        if native:
+            return native.show(self.target_thread({'message_thread_id':getattr(self,'reply_topic',None)}))
         buttons=[]
         lines=['Очередь: '+str(len(self.queue_items)), 'Приостановлена' if self.state.get('queue_paused') or not enabled() else 'Включена']
         for index,item in enumerate(self.queue_items):
@@ -85,6 +93,9 @@ class Features(Questions):
         self.show_queue()
 
     def drain_queue(self):
+        native=getattr(self,'native_queue',None)
+        if native:
+            return native.flush()
         if self.active or not enabled() or self.state.get('queue_paused') or not self.queue_items:
             return
         if time.monotonic()-self.queue_poll<3:
@@ -122,10 +133,13 @@ class Features(Questions):
             return
         self.snapshot_poll=time.monotonic()
         ids={self.state.get('thread')}
+        native=getattr(self,'native_queue',None)
+        if native:
+            ids.update(r['thread'] for r in native.receipts.values())
         if self.active:
             ids.add(self.active['threadId'])
         if self.queue_items:
-            ids.add(self.queue_items[0]['thread'])
+            ids.update(item['thread'] for item in self.queue_items)
         # Subscribe to recent user chats as well, for requests launched on desktop.
         try:
             recent=self.call('thread/list',{'limit':10,'sortKey':'updated_at','sortDirection':'desc'}).get('data',[])
@@ -150,6 +164,9 @@ class Features(Questions):
             return
         self.snapshots[thread]={'state':state,'owner':event.get('sourceClientId'),'received':time.monotonic()}
         remember(thread,state.get('title'),state.get('cwd'))
+        native=getattr(self,'native_queue',None)
+        if native:
+            native.observe(thread,state)
         try:
             self.mirror.observe(thread,state)
         except (RuntimeError,OSError,sqlite3.Error):

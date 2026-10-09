@@ -46,9 +46,12 @@ class Bridge(Features):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log, text=True)
         threading.Thread(target=self.read, daemon=True).start()
         self.call('initialize', {'clientInfo': {
-            'name': 'telegram_bridge', 'title': 'Telegram Bridge', 'version': '0.1'}})
+            'name': 'telegram_bridge', 'title': 'Telegram Bridge', 'version': '0.1'},
+            'capabilities': {'experimentalApi': True}})
         self.write({'method': 'initialized', 'params': {}})
         self.init_features()
+        from native_queue import NativeQueue
+        self.native_queue = NativeQueue(self)
 
     def write(self, data):
         self.proc.stdin.write(json.dumps(data) + '\n')
@@ -88,7 +91,7 @@ class Bridge(Features):
         temp.chmod(0o600)
         temp.replace(STATE)
 
-    def say(self, text, notification=False, markup=None, thread=None):
+    def say(self, text, notification=False, markup=None, thread=None, compact=False):
         result = None
         body, title, meta = service_parts(text)
         title = title or (title_for(thread) if thread else None)
@@ -100,8 +103,8 @@ class Bridge(Features):
                 break
             if index:
                 time.sleep(1.1)
-            result = api(self.config['token'], 'sendMessage', {'chat_id': self.config['chat_id'],
-                'text': part, '_presentation': {'body':part, 'title':title,
+            result = api(self.config['token'], 'sendMessage', {**({'entities': []} if compact else {}), 'chat_id': self.config['chat_id'],
+                'text': part, '_thread': thread, '_topic': getattr(self,'reply_topic',None), '_presentation': {'body':part, 'title':title,
                     'meta': meta + ([('Часть',f'{index+1}/{len(parts)}')] if len(parts)>1 else [])},
                 'link_preview_options': {'is_disabled': True},
                 'reply_markup': markup if markup is not None else keyboard(enabled())})
@@ -136,6 +139,10 @@ class Bridge(Features):
             if item.get('type') == 'agentMessage' and item.get('phase') != 'commentary':
                 self.answers[params.get('turnId')] = item.get('text', '')
         elif method == 'turn/completed':
+            # Native queue finals are tracked by their client/turn IDs and the
+            # original owner's snapshots, not unscoped app-server notifications.
+            if getattr(self,'native_queue',None):
+                return
             turn = params.get('turn', {})
             self.active = None
             self.approvals.clear()
@@ -148,9 +155,25 @@ class Bridge(Features):
 
 
     def message(self, message):
+        previous=getattr(self,'reply_topic',None)
+        self.reply_topic=message.get('message_thread_id')
+        try:
+            return self._message(message)
+        finally:
+            self.reply_topic=previous
+
+    def _message(self, message):
         chat = message.get('chat', {})
         if str(chat.get('id')) != str(self.config['chat_id']) or chat.get('type') != 'private':
             return
+        if message.get('message_thread_id'):
+            from topics import thread_for
+            from chat_store import reply_thread
+            bound=thread_for(self.config['chat_id'],message['message_thread_id'])
+            replied=reply_thread(self.config['chat_id'],message.get('reply_to_message',{}))
+            if replied and replied!=bound:
+                self.say('Этот ответ относится к другой беседе. Открой её ветку в Telegram.')
+                return
         if self.question_message(message):
             return
         media_item, _ = attachment(message)
@@ -194,19 +217,17 @@ class Bridge(Features):
         elif command == '/new':
             self.new_chat_choices()
         elif command == '/chats':
-            threads = self.call('thread/list', {'limit': 10, 'sortKey': 'updated_at', 'sortDirection': 'desc'}).get('data', [])
-            self.state['chat_choices'] = {t['id']: t['id'] for t in threads}
-            self.save()
-            buttons = [[{'text': (t.get('name') or t.get('preview') or t['id'])[:60],
-                         'callback_data': 'chat:'+t['id']}] for t in threads]
-            self.say('Выбери чат:' if threads else 'Чатов нет.',
-                     markup={'inline_keyboard': buttons} if buttons else None)
+            from chat_menu import ChatMenu
+            ChatMenu(self).open()
         elif command == '/limits':
             try:
                 self.say(format_limits(self.call('account/rateLimits/read', {})))
             except (RuntimeError, queue.Empty):
                 self.say('Не удалось получить лимиты. Проверь вход Codex через ChatGPT и подключение к сети.')
         elif command == '/status':
+            if getattr(self,'native_queue',None):
+                self.native_queue.status(self.target_thread(message))
+                return
             self.say('Удалённый режим: ' + ('включён' if enabled() else 'выключен') + '\nЧат: ' + self.state.get('thread', 'не выбран') + '\n' + ('Работает' if self.active else 'Ожидает') + '\nВ очереди: ' + str(len(self.queue_items)))
         elif command in ('/approve', '/decline'):
             self.decide_approval(argument, command == '/approve')
@@ -219,6 +240,9 @@ class Bridge(Features):
         elif command == '/stop':
             self.state['queue_paused'] = True
             self.save()
+            if getattr(self,'native_queue',None):
+                self.native_queue.stop(self.target_thread(message))
+                return
             if self.active:
                 if self.active.get('transport') == 'vscode':
                     self.connect_ipc().request('thread-follower-interrupt-turn', {
@@ -235,6 +259,10 @@ class Bridge(Features):
             self.say('Очередь приостановлена. Для продолжения нажми «Очередь» → «Продолжить».')
         elif command == '/use':
             thread = self.call('thread/read', {'threadId': argument})['thread']
+            from topics import bind_topic
+            if getattr(self,'reply_topic',None) and not bind_topic(self.config['chat_id'],self.reply_topic,thread['id']):
+                self.say('У этой ветки уже есть беседа, либо выбранная беседа уже открыта в другой ветке. Используй её ветку или создай новую.')
+                return
             self.state['thread'] = thread['id']
             self.save()
             remember(thread['id'], thread.get('name') or thread.get('preview'), thread.get('cwd'))
@@ -385,6 +413,10 @@ class Bridge(Features):
         self.state.pop('new_chat_choices', None)
         self.save()
         thread = create_chat(cwd)
+        from topics import bind_topic, thread_for
+        topic=getattr(self,'reply_topic',None)
+        if topic and not thread_for(self.config['chat_id'],topic):
+            bind_topic(self.config['chat_id'],topic,thread['id'])
         self.state['thread'], self.state['cwd'] = thread['id'], cwd
         self.save()
         opened = open_in_vscode(thread['id'])
@@ -392,7 +424,7 @@ class Bridge(Features):
                        else '➕ Чат в проекте создан и выбран.\nПроект: ' + Path(cwd).name)
         self.say(description+'\nЧат: '+thread['id']+
                  ('\nОтправлена команда открытия в VS Code. Теперь отправь первый промпт.' if opened else
-                  '\nНе удалось открыть VS Code автоматически. Открой этот чат в Codex, затем отправь промпт.'))
+                  '\nНе удалось открыть VS Code автоматически. Открой этот чат в Codex, затем отправь промпт.'),thread=thread['id'])
 
     def connect_ipc(self):
         if self.ipc is None or self.ipc.closed:
@@ -440,6 +472,14 @@ class Bridge(Features):
         self.save()
 
     def callback(self, callback):
+        previous=getattr(self,'reply_topic',None)
+        self.reply_topic=callback.get('message',{}).get('message_thread_id')
+        try:
+            return self._callback(callback)
+        finally:
+            self.reply_topic=previous
+
+    def _callback(self, callback):
         message = callback.get('message', {})
         if (str(callback.get('from', {}).get('id')) != str(self.config['chat_id']) or
                 str(message.get('chat', {}).get('id')) != str(self.config['chat_id'])):
@@ -450,7 +490,10 @@ class Bridge(Features):
             self.question_callback(key)
             return
         if action == 'guide':
-            self.message({'chat': {'id': self.config['chat_id'], 'type': 'private'}, 'text': '/guide'})
+            self.message({'chat': {'id': self.config['chat_id'], 'type': 'private'}, 'message_thread_id':getattr(self,'reply_topic',None), 'text': '/guide'})
+            return
+        if action == 'nativeq' and getattr(self,'native_queue',None):
+            self.native_queue.remove(key)
             return
         if action in ('qdel', 'qctl'):
             self.queue_control(action, key)
@@ -464,7 +507,17 @@ class Bridge(Features):
         if action == 'new':
             self.new_chat_selected(key)
             return
-        if action == 'chat':
+        if action == 'chatmore':
+            from chat_menu import ChatMenu
+            ChatMenu(self).more(key, message)
+            return
+        if action == 'chatpick':
+            from chat_menu import ChatMenu
+            thread = ChatMenu(self).choose(key, message)
+            if not thread:
+                return
+            text = '/use ' + thread
+        elif action == 'chat':
             thread = self.state.get('chat_choices', {}).get(key)
             if not thread:
                 self.say('Список устарел. Нажми «Выбрать чат» ещё раз.')
@@ -474,7 +527,7 @@ class Bridge(Features):
             text = '/' + action + ' ' + key
         else:
             return
-        self.message({'chat': {'id': self.config['chat_id'], 'type': 'private'}, 'text': text})
+        self.message({'chat': {'id': self.config['chat_id'], 'type': 'private'}, 'message_thread_id':getattr(self,'reply_topic',None), 'text': text})
 
     def run(self):
         self.say('Мост Codex подключён. /help', notification=True)
@@ -483,7 +536,11 @@ class Bridge(Features):
             while not self.events.empty():
                 self.event(self.events.get())
             self.poll_vscode_turn()
+            if getattr(self,'native_queue',None):
+                self.native_queue.poll_finished()
             progress.sweep(self.config)
+            from chat_menu import ChatMenu
+            ChatMenu(self).sweep()
             self.drain_queue()
             if self.proc.poll() is not None:
                 raise RuntimeError('Codex остановился')

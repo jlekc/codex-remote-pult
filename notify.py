@@ -32,6 +32,14 @@ def tls_context():
 
 
 def api(token, method, data):
+    data = dict(data)
+    thread = data.pop('_thread', None)
+    topic = data.pop('_topic', None)
+    if thread:
+        from topics import ensure_topic
+        topic = ensure_topic(token, data['chat_id'], thread, api)
+    if topic:
+        data['message_thread_id'] = topic
     if method == 'sendMessage':
         data = message_data(data)
     request = urllib.request.Request(
@@ -106,7 +114,7 @@ def send(config, event, force=False):
                 time.sleep(1.1)
             text = header + (f'\nЧасть {index+1}/{len(parts)}' if len(parts)>1 else '') + '\n\n' + part
             result = api(config['token'], 'sendMessage', {
-                'chat_id': config['chat_id'], 'text': text,
+                'chat_id': config['chat_id'], 'text': text, '_thread': thread,
                 '_presentation': {'title': title_for(thread) if thread else None,
                     'event': headline, 'body': part, 'author': 'agent',
                     'meta': [('Проект', project[:80])] + ([('Чат', str(thread))] if thread else [])

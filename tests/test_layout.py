@@ -76,7 +76,7 @@ class LayoutTests(unittest.TestCase):
                 sent.append(json.loads(req.data))
                 return io.BytesIO(json.dumps({'ok':True,'result':{'message_id':len(sent)}}).encode())
             answer='Текст 🙂 < & >\n'*1000
-            with patch.object(notify.urllib.request,'urlopen',side_effect=urlopen),patch.object(notify.time,'sleep'):
+            with patch('topics.ensure_topic',return_value=None),patch.object(notify.urllib.request,'urlopen',side_effect=urlopen),patch.object(notify.time,'sleep'):
                 notify.send({'chat_id':123,'token':'dummy'}, {'thread-id':'A','thread-name':'Длинный чат','cwd':folder,'last-assistant-message':answer},force=True)
             reconstructed=[]
             for index,d in enumerate(sent):

@@ -6,6 +6,7 @@ import urllib.request
 from urllib.parse import unquote
 import uuid
 from notify import tls_context
+from topics import topic_for
 from chat_store import bind, register_download
 from layout import format_message
 
@@ -48,8 +49,11 @@ def send_document(config,path,cwd,thread,title):
         'body':'📎 '+p.name, 'meta':[('Чат',thread)]})
     caption=formatted['text']
     parts=[]
-    for key,value in [('chat_id',str(config['chat_id'])),('caption',caption),
-                      ('caption_entities',json.dumps(formatted['entities'],ensure_ascii=False))]:
+    fields=[('chat_id',str(config['chat_id'])),('caption',caption),
+            ('caption_entities',json.dumps(formatted['entities'],ensure_ascii=False))]
+    topic=topic_for(config['chat_id'],thread) if thread else None
+    if topic:fields.append(('message_thread_id',str(topic)))
+    for key,value in fields:
         parts.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+key+'"\r\n\r\n'+value+'\r\n').encode())
     filename=''.join(c for c in p.name if c not in '\r\n"\\') or 'file'
     parts.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="document"; filename="'+filename+'"\r\nContent-Type: application/octet-stream\r\n\r\n').encode())
